@@ -1,0 +1,72 @@
+version: "3.9"
+services:
+  redis-service:
+    container_name: redis-service
+    restart: always
+    image: redis:latest
+    healthcheck:
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+      test: redis-cli ping
+    environment:
+      TZ: Europe/Moscow
+    ports:
+      - '6379:6379'
+
+  influxdb-service:
+    container_name: influxdb-service
+    restart: always
+    image: influxdb:1.7
+    environment:
+      INFLUXDB_DB: ${INFLUXDB_DB}
+      INFLUXDB_ADMIN_USER: ${INFLUXDB_ADMIN_USER}
+      INFLUXDB_ADMIN_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+      test: [ "CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/127.0.0.1/8086" ]
+    ports:
+      - '8086:8086'
+
+  producer-service:
+    container_name: producer-service
+    build: ./producer_service
+    restart: always
+    environment:
+      CHANNEL_NAME: ${CHANNEL_NAME}
+      TICKERS_NUMBER: ${TICKERS_NUMBER}
+      REDIS_HOST: ${REDIS_HOST}
+      TZ: Europe/Moscow
+      PYTHONUNBUFFERED: 1
+    command: bash -c "python3.9 /app/main.py"
+    depends_on:
+      redis-service:
+        condition: service_healthy
+      influxdb-service:
+        condition: service_healthy
+
+  web-service:
+    container_name: web-service
+    build: ./web_service
+    restart: always
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      CHANNEL_NAME: ${CHANNEL_NAME}
+      INFLUXDB_HOST: ${INFLUXDB_HOST}
+      INFLUXDB_DB: ${INFLUXDB_DB}
+      INFLUXDB_ADMIN_USER: ${INFLUXDB_ADMIN_USER}
+      INFLUXDB_ADMIN_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+      TZ: Europe/Moscow
+      PYTHONUNBUFFERED: 1
+    ports:
+      - '80:80'
+    command: gunicorn -k eventlet -b 0.0.0.0:80 app:app
+    depends_on:
+      redis-service:
+        condition: service_healthy
+      influxdb-service:
+        condition: service_healthy
